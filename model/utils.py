@@ -282,15 +282,17 @@ def encoded_columns(df, columns_to_encode_list, name_df):
     d = defaultdict(preprocessing.LabelEncoder)
     fit = df[columns_to_encode_list].apply(lambda x: d[x.name].fit_transform(x.fillna('0')))
     for col in fit.columns:
-        outF = open("data\output\label_map\{0}_{1}_label_map.csv".format(name_df, col), "w")
-        outF.write('label_encoded;label_decoded')
         df[col + '_LABELED'] = fit[col]
+        """
+        outF = open("label_map\{0}_{1}_label_map.csv".format(name_df, col), "w")
+        outF.write('label_encoded;label_decoded')
         for i, class_ in enumerate(d[col].classes_):
             outF.write('{};{}'.format(i, class_))
             outF.write("\n")
         outF.close()
     for key, value in d.items():
         print(key, value)
+        """
     return df
 
 
