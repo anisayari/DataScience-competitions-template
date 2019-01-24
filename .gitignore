@@ -2,3 +2,4 @@
 .ipynb_checkpoints/*
 __pycache__/*
 model/.ipynb_checkpoints/*
+model/fork.ipynb
