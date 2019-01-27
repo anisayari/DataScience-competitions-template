@@ -1,0 +1,32 @@
+#+BEGIN_QUOTE
+A template with essential code to start on kaggle
+#+END_QUOTE
+
+* Kaggle Competitions Template
+
+
+** Useful links
+
+
+*** General ML techniques
+- https://towardsdatascience.com/hyperparameter-tuning-the-random-forest-in-python-using-scikit-learn-28d2aa77dd74
+- https://scikit-learn.org/stable/auto_examples/model_selection/plot_randomized_search.html
+- https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.LeaveOneOut.html
+
+
+*** Text Mining and NLP techniques
+- https://www.kdnuggets.com/2018/03/text-data-preprocessing-walkthrough-python.html
+- https://www.datacamp.com/community/tutorials/web-scraping-python-nlp
+- http://www.tulane.edu/~howard/NLP/webpages.html
+- https://stevenloria.com/tf-idf/
+
+*** Keras specifics
+- https://machinelearningmastery.com/use-keras-deep-learning-models-scikit-learn-python/
+- https://stackoverflow.com/questions/41032551/how-to-compute-receiving-operating-characteristic-roc-and-auc-in-keras
+
+
+*** Audio data related
+- https://askubuntu.com/questions/249828/command-to-see-media-file-info-in-terminal
+- https://github.com/tensorflow/models/blob/master/research/audioset/vggish_inference_demo.py
+- https://github.com/alibugra/audio-data-augmentation/blob/master/AudioAugmentation.py
+
