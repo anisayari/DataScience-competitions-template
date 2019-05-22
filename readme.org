@@ -1,5 +1,5 @@
 #+BEGIN_QUOTE
-A template with essential code to start on kaggle
+A template with essential code to start on DataScience Competitions
 #+END_QUOTE
 
 * Kaggle Competitions Template
