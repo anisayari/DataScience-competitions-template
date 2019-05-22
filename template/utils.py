@@ -1,4 +1,8 @@
+import urllib
+
+import cv2
 import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from tqdm import tqdm
 import math
 import os
@@ -6,20 +10,20 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn import preprocessing
 import configparser
-
 import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import scale
+from sklearn.decomposition import PCA, TruncatedSVD
+from sklearn.preprocessing import scale, MinMaxScaler, LabelEncoder
 import time
 timestr = time.strftime("%Y%m%d-%H%M%S")
-
-
 #pd.options.display.float_format = '{:.5g}'.format
 pd.options.display.float_format = '{:,.2f}'.format
 
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 import joblib, pickle
+
+from stop_words import get_stop_words
+stop_words_fr = get_stop_words('fr')
 
 
 def normalize_by(df, by):
@@ -275,12 +279,12 @@ def print_multiple(df, kind, sample=False, sample_size=None, max=1000, save_fig=
     # fig.savefig('test.png', bbox_inches="tight")
 
 
-def encoded_columns(df, columns_to_encode_list, name_df):
+def encoded_columns(df, columns_to_encode_list):
     le = preprocessing.LabelEncoder()
 
     from collections import defaultdict
     d = defaultdict(preprocessing.LabelEncoder)
-    fit = df[columns_to_encode_list].apply(lambda x: d[x.name].fit_transform(x.fillna('0')))
+    fit = df[columns_to_encode_list].apply(lambda x: d[x.name].fit_transform(x.fillna('missing')))
     for col in fit.columns:
         df[col + '_LABELED'] = fit[col]
         """
@@ -438,3 +442,279 @@ def PCA_study(df):
         plt.show()
 
     return data, pca_components_df
+
+
+def extract_features_from_image(df, id_column, column_path):
+    print('here______________________________')
+    from tensorflow.keras.applications.densenet import preprocess_input, DenseNet121
+    from tensorflow.keras.models import Model
+    from tensorflow.keras.layers import GlobalAveragePooling2D, Input, Lambda, AveragePooling1D
+    import tensorflow.keras.backend as K
+    import tensorflow as tf
+    from tensorflow.python.client import device_lib
+
+    tf.logging.set_verbosity(tf.logging.INFO)
+    sess = tf.Session()
+
+    def get_available_gpus():
+        local_device_protos = device_lib.list_local_devices()
+        return [x.name for x in local_device_protos if x.device_type == 'GPU']
+
+    print(get_available_gpus())
+
+    def load_image(img_size, path='', url=''):
+        def resize_to_square(im, img_size):
+            old_size = im.shape[:2]  # old_size is in (height, width) format
+            ratio = float(img_size) / max(old_size)
+            new_size = tuple([int(x * ratio) for x in old_size])
+            # new_size should be in (width, height) format
+            im = cv2.resize(im, (new_size[1], new_size[0]))
+            delta_w = img_size - new_size[1]
+            delta_h = img_size - new_size[0]
+            top, bottom = delta_h // 2, delta_h - (delta_h // 2)
+            left, right = delta_w // 2, delta_w - (delta_w // 2)
+            color = [0, 0, 0]
+            new_im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+            return new_im
+        if url =='':
+            image = cv2.imread(path)
+            
+        elif path=='': 
+                # download the image, convert it to a NumPy array, and then read
+            # it into OpenCV format
+            resp = urllib.request.urlopen(url)
+            image = np.asarray(bytearray(resp.read()), dtype="uint8")
+            image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+
+        new_image = resize_to_square(image, img_size)
+        new_image = preprocess_input(new_image)
+        return new_image
+
+    def init_densenet():
+        print('[INFO] Init Densenet...')
+        inp = Input((256, 256, 3))
+        print('[INFO] import Densenet...')
+        backbone = DenseNet121(input_tensor=inp, include_top=False,
+                               weights='../input/densenet-121-weights/densenet121_weights_tf_dim_ordering_tf_kernels_notop.h5')
+        print('[INFO] import Densenet DONE')
+        x = backbone.output
+        x = GlobalAveragePooling2D()(x)
+        x = Lambda(lambda x: K.expand_dims(x, axis=-1))(x)
+        x = AveragePooling1D(4)(x)
+        out = Lambda(lambda x: x[:, :, 0])(x)
+        m = Model(inp, out)
+        print('[INFO] Init Densenet DONE.')
+        return m
+
+    m = init_densenet()
+
+    print('[INFO] Start Image Features_Extraction...')
+    img_size = 256
+    batch_size = 16
+    ids = df[id_column].values
+    n_batches = len(ids) // batch_size + 1
+    features = {}
+    for b in tqdm(range(n_batches)):
+        start = b * batch_size
+        end = (b + 1) * batch_size
+        batch_ids = ids[start:end]
+        batch_images = np.zeros((len(batch_ids), img_size, img_size, 3))
+        for i, id_ in enumerate(batch_ids):
+            
+            #image_name = '{}-{}.jpg'.format(id_, 1)
+            #image_path = jp(input_dir, subfolder, image_name)
+            image_path= df.loc[df['id']==id_][column_path].values[0]
+            try:
+                batch_images[i] = load_image(256,url=image_path)
+            except:
+                continue
+        batch_preds = m.predict(batch_images)
+        for i, id_ in enumerate(batch_ids):
+            features[id_] = batch_preds[i]
+
+    df_features = pd.DataFrame.from_dict(features, orient='index')
+    df_features.rename(columns=lambda k: 'img_{}'.format(k), inplace=True)
+    df_features.reset_index(inplace=True)
+    df_features.rename(columns={df_features.columns[0]: id_column}, inplace=True)
+    n_components = 200
+    svd = TruncatedSVD(n_components=n_components)
+    X = df_features[['img_{}'.format(k) for k in range(256)]].values
+    svd.fit(X)
+    print('fit done')
+    X_svd = svd.transform(X)
+    X_svd = pd.DataFrame(X_svd, columns=['img_svd_{}'.format(i) for i in range(n_components)])
+    X_svd[id_column] = df.id.values.tolist()
+
+    df = pd.concat([df.set_index(id_column), X_svd.set_index(id_column)], sort=False, axis=1).reset_index()
+    df.rename(columns={df.columns[0]: id_column}, inplace=True)
+    print('[INFO] Image Features_Extraction DONE.')
+    return df
+
+
+
+"""
+IMAGE
+"""
+#@TODO : 'To fill'
+
+"""
+SONG
+"""
+#@TODO : 'To fill'
+
+
+"""
+FEATURE ENGINEERING COMMON FUNCTIONS
+"""
+#@TODO : 'Need to check with auto FE libraries
+"""
+MATHEMATICS FEATURES
+"""
+def create_mathematics_features(df, column_to_count, column_to_groupby):
+    df_tmp = df.groupby(column_to_groupby)[column_to_count].agg(['count','mean', 'std', 'max', 'min'])
+    df_tmp.columns =['count_' + column_to_count, 'mean_' + column_to_count, 'std_' + column_to_count,'max_' + column_to_count, 'min_' +column_to_count,]
+    df = df.merge(df_tmp, on=column_to_groupby, how='left')
+    return df 
+
+"""
+NUMERICAL FEATURES
+"""
+def get_len_columns(df, len_columns):
+    for col_ in len_columns:
+        df["len_" + col_] = df[col_].str.len()
+    return df
+
+def transform_to_log(df,columns_to_log):
+    for col_ in columns_to_log:
+        df['log_' + col_] = (1+df[col_]).apply(np.log)
+    return df
+
+def count_product_per_store(df, column_to_groupby, column_to_count):
+    tmp = df.groupby(column_to_groupby).count()[column_to_count].reset_index()
+    tmp.columns = [column_to_groupby] + ["number_" + column_to_count + '_' + column_to_groupby]
+    df = df.merge(tmp, on=column_to_groupby, how='left')
+    return df
+
+def count_item_column(df, column_to_count, column_groupby):
+    rescuer_count = df.groupby([column_to_count])[column_groupby].count().reset_index()
+    rescuer_count.rename(columns={rescuer_count.columns[0]: column_to_count}, inplace=True)
+    rescuer_count.columns = [column_to_count, column_to_count+'_COUNT']
+    df = df.merge(rescuer_count, how='left', on=column_to_count)
+    return df
+
+def label_encoding(df,columns_to_encode):
+    labelencoder = LabelEncoder()
+    categ_cols = columns_to_encode
+    for columns_ in categ_cols:
+        df[columns_+'_ENCODED'] = labelencoder.fit_transform(df[columns_].values.astype(str))
+    return df
+
+def binarie_fill(df,column):
+    df[column] = df[column].fillna(0)
+    if True in df[column].tolist():
+        df[column]= np.where(df[column]==True,1,0)
+    else:
+        df[column]= np.where(df[column]==0,0,1)
+    return df
+
+"""
+TEXT
+"""
+
+def apply_tfidf_vectorizer(df, column):
+    df[column] = df[column].fillna("missing")
+    df[column] = df[column].astype(str)
+    vectorizer = TfidfVectorizer(analyzer='word', ngram_range=(1,3), stop_words = stop_words_fr, lowercase=True, 
+                                     max_features=50, binary=True, norm=None,use_idf=False)
+    tfidf = vectorizer.fit_transform(df[column])
+    tfidf_cols = vectorizer.get_feature_names()
+    tmp = pd.DataFrame(data=tfidf.toarray(), columns=['tfidf_' + column + '_' + i for i in tfidf_cols])
+    df = pd.concat([df, tmp], axis=1,sort=False)
+    return df
+
+
+def tfidf_nmf_svd(df,text_columns):
+    for col_ in tqdm(text_columns):
+        text = df[col_].values.tolist()
+        cvec = CountVectorizer(min_df=2, ngram_range=(1, 3), max_features=1000,
+                               strip_accents='unicode',
+                               lowercase=True, analyzer='word', token_pattern=r'\w+',
+                               stop_words=stop_words_fr)
+        text = [str(element) for element in text]
+        cvec.fit(text)
+        X = cvec.transform(text)
+        df['cvec_sum'] = X.sum(axis=1)
+        df['cvec_mean'] = X.mean(axis=1)
+        df['cvec_len'] = (X != 0).sum(axis=1)
+        tfv = TfidfVectorizer(min_df=2, max_features=200,
+                              strip_accents='unicode', analyzer='word',
+                              ngram_range=(1, 3), use_idf=1, smooth_idf=1, sublinear_tf=1,
+                              stop_words=stop_words_fr)
+
+        # Fit TFIDF
+        X = tfv.fit_transform(text)
+        df['tfidf_sum'] = X.sum(axis=1)
+        df['tfidf_mean'] = X.mean(axis=1)
+        df['tfidf_len'] = (X != 0).sum(axis=1)
+        
+        """
+        n_components = 20
+
+        print('[INFO] Start NMF')
+
+        nmf_ = NMF(n_components=n_components)
+        X_nmf = nmf_.fit_transform(X)
+        X_nmf = pd.DataFrame(X_nmf, columns=['{}_nmf_{}'.format(col_, i) for i in range(n_components)])
+        X_nmf['id'] = df.id.values.tolist()
+        df = pd.concat([df.set_index('id'), X_nmf.set_index('id')], sort=False, axis=1).reset_index()
+        df.rename(columns={df.columns[0]: 'id'}, inplace=True)
+
+        print('[INFO] Start SVD')
+        svd = TruncatedSVD(n_components=n_components)
+        svd.fit(X)
+        print('fit done')
+        X_svd = svd.transform(X)
+        X_svd = pd.DataFrame(X_svd, columns=['{}_svd_{}'.format(col_, i) for i in range(n_components)])
+        X_svd['id'] = df.id.values.tolist()
+        df = pd.concat([df.set_index('id'), X_svd.set_index('id')], sort=False, axis=1).reset_index()
+        df.rename(columns={df.columns[0]: 'id'}, inplace=True)
+        df.drop(col_, axis=1, inplace=True)
+        """
+    return df
+
+def reduce_mem_usage(df):
+    """ iterate through all the columns of a dataframe and modify the data type
+        to reduce memory usage.
+    """
+    start_mem = df.memory_usage().sum() / 1024 ** 2
+    print('Memory usage of dataframe is {:.2f} MB'.format(start_mem))
+
+    for col in df.columns:
+        col_type = df[col].dtype
+
+        if col_type != object:
+            c_min = df[col].min()
+            c_max = df[col].max()
+            if str(col_type)[:3] == 'int':
+                if c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
+                    df[col] = df[col].astype(np.int8)
+                elif c_min > np.iinfo(np.int16).min and c_max < np.iinfo(np.int16).max:
+                    df[col] = df[col].astype(np.int16)
+                elif c_min > np.iinfo(np.int32).min and c_max < np.iinfo(np.int32).max:
+                    df[col] = df[col].astype(np.int32)
+                elif c_min > np.iinfo(np.int64).min and c_max < np.iinfo(np.int64).max:
+                    df[col] = df[col].astype(np.int64)
+            else:
+                if c_min > np.finfo(np.float16).min and c_max < np.finfo(np.float16).max:
+                    df[col] = df[col].astype(np.float16)
+                elif c_min > np.finfo(np.float32).min and c_max < np.finfo(np.float32).max:
+                    df[col] = df[col].astype(np.float32)
+                else:
+                    df[col] = df[col].astype(np.float64)
+        else:
+            df[col] = df[col].astype('category')
+
+    end_mem = df.memory_usage().sum() / 1024 ** 2
+    print('Memory usage after optimization is: {:.2f} MB'.format(end_mem))
+    print('Decreased by {:.1f}%'.format(100 * (start_mem - end_mem) / start_mem))
+    return df
