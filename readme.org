@@ -1,8 +1,8 @@
 #+BEGIN_QUOTE
-A template with essential code to start on DataScience Competitions
+A template with essential code to start on Data Science Competitions
 #+END_QUOTE
 
-* Kaggle Competitions Template
+* Data Science Competitions Template
 
 
 ** Useful links
