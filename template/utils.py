@@ -718,3 +718,24 @@ def reduce_mem_usage(df):
     print('Memory usage after optimization is: {:.2f} MB'.format(end_mem))
     print('Decreased by {:.1f}%'.format(100 * (start_mem - end_mem) / start_mem))
     return df
+
+def leave_one_hot_encoding(train,test,col_to_consider,label_columns):
+    print('[INFO] Start Leave One Hot Encoding....')
+    
+    # leave-one-out target encoding
+    sum_column_name = 'sum_{}'.format(label_columns)
+    count_column_name = 'count_{}'.format(label_columns)
+    target_sum = train.groupby(col_to_consider)[label_columns].sum().reset_index(name = sum_column_name )
+    target_count = train.groupby(col_to_consider)[label_columns].count().reset_index(name = count_column_name)
+    target_stats = pd.merge(target_sum, target_count, on = col_to_consider)
+    
+    train = train.merge(target_stats, on = col_to_consider, how = 'left')
+    test = test.merge(target_stats, on = col_to_consider, how = 'left')
+
+    train['mean_{}'.format(label_columns)] = (train[sum_column_name] - train[label_columns])/(train[count_column_name]-1)
+    test['mean_{}'.format(label_columns)] = (test[sum_column_name])/(test[count_column_name])
+
+    train.drop([sum_column_name,count_column_name],axis=1,inplace=True)
+    test.drop([sum_column_name,count_column_name],axis=1,inplace=True)
+    print('[INFO] Start Leave One Hot Encoding DONE')
+    return train, test
